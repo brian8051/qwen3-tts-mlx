@@ -118,16 +118,22 @@ def generate(text: str, cancelled: threading.Event) -> Generator[tuple[int, byte
     with MODEL_LOCK:
         sample_rate: int | None = None
         pending_pause_count = 0
-        for kind, value in synthesis_segments(text):
+        for segment_index, (kind, value) in enumerate(synthesis_segments(text)):
             if kind == "pause":
                 pending_pause_count += 1
+                LOGGER.warning("TTS timing segment=%d kind=pause pending=%d", segment_index, pending_pause_count)
                 continue
             assert value is not None
-            for chunk in synthesis_chunks(value):
+            for chunk_index, chunk in enumerate(synthesis_chunks(value)):
+                started_at = time.perf_counter()
+                first_packet = True
                 for result in MODEL.generate(text=chunk, ref_audio=required("TTS_REFERENCE_AUDIO"), ref_text=REFERENCE_TEXT, temperature=TEMPERATURE, stream=True, streaming_interval=STREAMING_INTERVAL):
                     if cancelled.is_set():
                         return
                     sample_rate = result.sample_rate
+                    if first_packet:
+                        LOGGER.warning("TTS timing segment=%d chunk=%d first_packet=%.3fs pending_pauses=%d", segment_index, chunk_index, time.perf_counter() - started_at, pending_pause_count)
+                        first_packet = False
                     while pending_pause_count:
                         yield sample_rate, silence_pcm(sample_rate)
                         pending_pause_count -= 1
