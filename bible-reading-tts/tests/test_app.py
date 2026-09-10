@@ -50,14 +50,38 @@ APP = load_app()
 
 
 class RuntimeProtocolTests(unittest.TestCase):
-    def test_marker_is_removed_and_orders_pause_before_title_and_body(self):
-        text = f"{APP.TITLE_PAUSE_MARKER} Title. {APP.TITLE_PAUSE_MARKER} Body."
-        self.assertEqual(list(APP.synthesis_segments(text)), [("pause", None), ("speech", "Title."), ("pause", None), ("speech", "Body.")])
+    def test_natural_punctuation_is_sent_to_qwen_without_marker_or_silence_protocol(self):
+        self.assertFalse(hasattr(APP, "TITLE_PAUSE_MARKER"))
+        self.assertFalse(hasattr(APP, "silence_pcm"))
+        self.assertEqual(list(APP.synthesis_chunks("Title, Body.")), ["Title, Body."])
 
-    def test_silence_is_exact_mono_pcm16_duration(self):
-        pcm = APP.silence_pcm(24_000)
-        self.assertEqual(len(pcm), 48_000)
-        self.assertEqual(pcm, b"\0" * 48_000)
+    def test_generation_streams_only_model_pcm_for_natural_title_punctuation(self):
+        class Result:
+            sample_rate = 24_000
+            audio = [0.25]
+
+        class Model:
+            def __init__(self):
+                self.texts = []
+
+            def generate(self, **kwargs):
+                self.texts.append(kwargs["text"])
+                yield Result()
+
+        model = Model()
+        original_pcm16 = APP.pcm16
+        APP.MODEL = model
+        APP.REFERENCE_TEXT = "reference"
+        APP.pcm16 = lambda _audio: bytes((1, 2))
+        os.environ["TTS_REFERENCE_AUDIO"] = "test-only"
+        try:
+            self.assertEqual(
+                list(APP.generate("Title, Body.", threading.Event())),
+                [(24_000, bytes((1, 2)))],
+            )
+            self.assertEqual(model.texts, ["Title, Body."])
+        finally:
+            APP.pcm16 = original_pcm16
 
     def test_packet_measurement_is_content_free_and_pcm_derived(self):
         measurement = APP.packet_measurement(7, 24_000, b"\0" * 15_360, 1.2346)
