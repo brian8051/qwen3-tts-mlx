@@ -207,10 +207,10 @@ async def stream(websocket: WebSocket) -> None:
                 sent_sequence += 1
                 sent_bytes += len(audio)
                 measurement = packet_measurement(sent_sequence, sample_rate, audio, time.perf_counter() - stream_started_at)
+                measurement["total_bytes"] = sent_bytes
                 LOGGER.warning(
-                    "TTS sent sequence=%(sequence)d bytes=%(bytes)d duration=%(duration).3fs elapsed=%(elapsed).3fs total_bytes=%d",
+                    "TTS sent sequence=%(sequence)d bytes=%(bytes)d duration=%(duration).3fs elapsed=%(elapsed).3fs total_bytes=%(total_bytes)d",
                     measurement,
-                    sent_bytes,
                 )
                 await websocket.send_bytes(audio)
             elif kind == "end":
