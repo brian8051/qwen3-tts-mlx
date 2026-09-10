@@ -59,6 +59,10 @@ class RuntimeProtocolTests(unittest.TestCase):
         self.assertEqual(len(pcm), 48_000)
         self.assertEqual(pcm, b"\0" * 48_000)
 
+    def test_packet_measurement_is_content_free_and_pcm_derived(self):
+        measurement = APP.packet_measurement(7, 24_000, b"\0" * 15_360, 1.2346)
+        self.assertEqual(measurement, {"sequence": 7, "bytes": 15_360, "duration": 0.32, "elapsed": 1.235})
+
     def test_signed_request_must_match_exact_text(self):
         os.environ["TTS_PLAYBACK_SIGNING_SECRET"] = "test-secret"
         text = "Authenticated request"

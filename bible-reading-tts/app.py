@@ -113,6 +113,16 @@ def silence_pcm(sample_rate: int, seconds: float = TITLE_PAUSE_SECONDS) -> bytes
     return bytes(int(sample_rate * seconds) * 2)
 
 
+def packet_measurement(sequence: int, sample_rate: int, audio: bytes, elapsed_seconds: float) -> dict[str, float | int]:
+    """Return content-free PCM facts suitable for cross-process timing logs."""
+    return {
+        "sequence": sequence,
+        "bytes": len(audio),
+        "duration": round(len(audio) / (sample_rate * 2), 3),
+        "elapsed": round(elapsed_seconds, 3),
+    }
+
+
 def generate(text: str, cancelled: threading.Event) -> Generator[tuple[int, bytes], None, None]:
     assert MODEL is not None
     with MODEL_LOCK:
@@ -167,7 +177,16 @@ async def stream(websocket: WebSocket) -> None:
         loop = asyncio.get_running_loop()
         def producer() -> None:
             try:
+                started_at = time.perf_counter()
+                sequence = 0
                 for packet in generate(text, cancelled):
+                    sequence += 1
+                    sample_rate, audio = packet
+                    measurement = packet_measurement(sequence, sample_rate, audio, time.perf_counter() - started_at)
+                    LOGGER.warning(
+                        "TTS generated sequence=%(sequence)d bytes=%(bytes)d duration=%(duration).3fs elapsed=%(elapsed).3fs",
+                        measurement,
+                    )
                     loop.call_soon_threadsafe(queue.put_nowait, ("audio", packet))
                 loop.call_soon_threadsafe(queue.put_nowait, ("end", None))
             except Exception:
@@ -175,6 +194,9 @@ async def stream(websocket: WebSocket) -> None:
                 loop.call_soon_threadsafe(queue.put_nowait, ("error", None))
         threading.Thread(target=producer, daemon=True).start()
         sent_metadata = False
+        sent_sequence = 0
+        sent_bytes = 0
+        stream_started_at = time.perf_counter()
         while True:
             kind, value = await queue.get()
             if kind == "audio":
@@ -182,6 +204,14 @@ async def stream(websocket: WebSocket) -> None:
                 if not sent_metadata:
                     await websocket.send_json({"type": "metadata", "format": "pcm_s16le", "sampleRate": sample_rate, "channels": 1})
                     sent_metadata = True
+                sent_sequence += 1
+                sent_bytes += len(audio)
+                measurement = packet_measurement(sent_sequence, sample_rate, audio, time.perf_counter() - stream_started_at)
+                LOGGER.warning(
+                    "TTS sent sequence=%(sequence)d bytes=%(bytes)d duration=%(duration).3fs elapsed=%(elapsed).3fs total_bytes=%d",
+                    measurement,
+                    sent_bytes,
+                )
                 await websocket.send_bytes(audio)
             elif kind == "end":
                 await websocket.send_json({"type": "end"})
