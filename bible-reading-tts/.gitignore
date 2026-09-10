@@ -1,0 +1,11 @@
+.env
+*.log
+__pycache__/
+*.py[oc]
+*.wav
+*.mp3
+*.m4a
+*.flac
+*.ogg
+*.pcm
+*.npy
